@@ -335,11 +335,12 @@ if __name__ == '__main__':
     env = gym.make("SpaceInvaders-v0")
     env = FireResetEnv(env)
     env = WarpFrame(env, grayscale=False)
+    env = ScaledFloatFrame(env)
     env = FrameStack(env, 4)
 
     # np.set_printoptions(threshold=np.inf)
     a = np.array(env.reset())
-
-    env = make_atari(env_id="SpaceInvaders-v0", scale=False)
-    b = np.array(env.reset())
-    print(a == b)
+    print(a)
+    # env = make_atari(env_id="SpaceInvaders-v0", scale=False)
+    # b = np.array(env.reset())
+    # print(b)

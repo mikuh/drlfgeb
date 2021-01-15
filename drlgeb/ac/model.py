@@ -1,20 +1,17 @@
 import tensorflow as tf
+from drlgeb.common import CnnEmbedding
 
 
 class ActorCriticModel(tf.keras.Model):
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_shape: tuple, action_size: int):
         super(ActorCriticModel, self).__init__()
-        self.state_size = state_size
         self.action_size = action_size
-        self.dense1 = tf.keras.layers.Dense(100, activation='relu')
+        self.embedding_layer = CnnEmbedding(state_shape)
         self.policy_logits = tf.keras.layers.Dense(action_size)
-        self.dense2 = tf.keras.layers.Dense(100, activation='relu')
         self.values = tf.keras.layers.Dense(1)
 
     def call(self, inputs):
-        # Forward pass
-        x = self.dense1(inputs)
-        logits = self.policy_logits(x)
-        v1 = self.dense2(inputs)
-        values = self.values(v1)
+        embedding = self.embedding_layer(inputs)
+        logits = self.policy_logits(embedding)
+        values = self.values(embedding)
         return logits, values
