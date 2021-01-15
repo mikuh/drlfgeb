@@ -129,7 +129,7 @@ class Worker(threading.Thread):
                     time_count = 0
                 if done:
                     Worker.global_episode += 1
-                    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%:M:%S")
+                    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%:M%:S")
                     print(f"Episode: {Worker.global_episode}, Score: {ep_score}, at: {current_time}, work: {self.worker_idx}")
                 ep_steps += 1
                 time_count += 1
