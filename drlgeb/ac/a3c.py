@@ -1,14 +1,14 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import threading
 import multiprocessing
 import tensorflow as tf
-import gym
 import numpy as np
 from queue import Queue
 from drlgeb.common import make_atari
 from drlgeb.ac import ActorCriticModel
 
-
+import datetime
 
 class Memory(object):
     def __init__(self):
@@ -32,7 +32,7 @@ class MasterAgent(object):
     def __init__(self, env_id="SpaceInvaders-v0", **configs):
         self.env_id = env_id
         self.configs = configs
-        env = make_atari(env_id)
+        env = make_atari(env_id, max_episode_steps=60000)
         self.state_shape = env.observation_space.shape
         self.action_size = env.action_space.n
 
@@ -51,7 +51,7 @@ class MasterAgent(object):
                           res_queue,
                           i,
                           env_id=self.env_id,
-                          configs=self.configs) for i in range(2)]  # multiprocessing.cpu_count()
+                          configs=self.configs) for i in range(multiprocessing.cpu_count())]  # multiprocessing.cpu_count()
 
         for i, worker in enumerate(workers):
             print("Starting worker {}".format(i))
@@ -86,7 +86,7 @@ class Worker(threading.Thread):
         self.local_model = ActorCriticModel(self.state_shape, self.action_size)
         self.worker_idx = idx
         self.env_id = env_id
-        self.env = make_atari(self.env_id)
+        self.env = make_atari(self.env_id, max_episode_steps=60000)
         self.save_dir = save_dir
         self.ep_loss = 0.0
 
@@ -109,10 +109,10 @@ class Worker(threading.Thread):
             while not done:
                 logits, values = self.local_model(np.array([current_state]))
                 policy = tf.nn.softmax(logits, name='policy')
+
                 action = np.random.choice(self.action_size, p=np.array(policy)[0])
                 new_state, reward, done, _ = self.env.step(action)
                 ep_score += reward
-
                 mem.store(current_state, action, reward)
 
                 if time_count == self.update_freq or done:
@@ -125,12 +125,12 @@ class Worker(threading.Thread):
                         self.opt.apply_gradients(zip(grads, self.global_model.trainable_weights))
                         # Update local model with new weights
                         self.local_model.set_weights(self.global_model.get_weights())
-
-                        mem.clear()
-                        time_count = 0
+                    mem.clear()
+                    time_count = 0
                 if done:
                     Worker.global_episode += 1
-                    print(f"Episode: {Worker.global_episode}, Score: {ep_score}")
+                    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%:M:%S")
+                    print(f"Episode: {Worker.global_episode}, Score: {ep_score}, at: {current_time}, work: {self.worker_idx}")
                 ep_steps += 1
                 time_count += 1
                 current_state = new_state
@@ -163,7 +163,7 @@ class Worker(threading.Thread):
         policy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=memory.actions,
                                                                      logits=logits)
         policy_loss = policy_loss * tf.stop_gradient(advantage) - 0.01 * entropy
-        loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
+        loss = tf.reduce_mean((1 * value_loss + policy_loss))
         return loss
 
 
