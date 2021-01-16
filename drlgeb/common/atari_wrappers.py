@@ -304,8 +304,10 @@ class LazyFrames(object):
 def make_atari(env_id, max_episode_steps=None, scale=True):
     """reference tensorpack's setting"""
     env = gym.make(env_id)
+    if env_id.startswith("CartPole"):
+        return env
     env = FireResetEnv(env)
-    env = WarpFrame(env, grayscale=False)
+    env = WarpFrame(env, grayscale=True)
     if scale:
         env = ScaledFloatFrame(env)
     env = FrameStack(env, 4)

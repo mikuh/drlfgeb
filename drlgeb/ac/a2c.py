@@ -1,177 +1,183 @@
 import tensorflow as tf
-import sys
-sys.path.append("../../")
-import numpy as np
-import gym
-import random
-import time
-
-from drlgeb.ac import ActorCriticModel
+from drlgeb.common import SubprocVecEnv
 from drlgeb.common import make_atari
+from drlgeb.ac.model import ActorCriticModel
+import multiprocessing as mp
+import gym
+import numpy as np
+
+import matplotlib.pyplot as plt
+
+num_envs = mp.cpu_count() * 2
 
 
+def make_env(env_id):
+    def _thunk():
+        if env_id.startswith("CartPole"):
+            env = gym.make(env_id)
+        else:
+            env = make_atari(env_id)
+        return env
 
-class Agent(object):
+    return _thunk
 
-    def __init__(self, model, env):
 
-        self.env = env
+# class ActorCriticModel(tf.keras.Model):
+#     def __init__(self, state_size, action_size):
+#         super(ActorCriticModel, self).__init__()
+#         self.state_size = state_size
+#         self.action_size = action_size
+#         self.dense1 = tf.keras.layers.Dense(100, activation='relu')
+#         self.policy_logits = tf.keras.layers.Dense(action_size)
+#         self.dense2 = tf.keras.layers.Dense(100, activation='relu')
+#         self.values = tf.keras.layers.Dense(1)
+#
+#     def call(self, inputs):
+#         # Forward pass
+#         x = self.dense1(inputs)
+#         logits = self.policy_logits(x)
+#         v1 = self.dense2(inputs)
+#         values = self.values(v1)
+#         return logits, values
+
+
+def plot(frame_idx, rewards):
+    plt.plot(rewards, 'b-')
+    plt.title('frame %s. reward: %s' % (frame_idx, rewards[-1]))
+    plt.pause(0.0001)
+
+
+class Memory(object):
+    def __init__(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.logits = []
+        self.probs = []
+        self.masks = []
+
+    def store(self, state, action, reward, value, logit, prob, mask):
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.values.append(value)
+        self.logits.append(logit)
+        self.probs.append(prob)
+        self.masks.append(mask)
+
+    def clear(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.logits = []
+        self.probs = []
+        self.masks = []
+
+
+class AgentMaster(object):
+
+    def __init__(self, env_id="CartPole-v0", **configs):
+        envs = [make_env(env_id) for _ in range(num_envs)]
+        self.env = make_atari(env_id, max_episode_steps=60000)
+        self.state_shape = self.env.observation_space.shape
         self.action_size = self.env.action_space.n
-        self.a2c = model
-        self.n_step = 1
-        self.repeat_sampling = 1
-        self.gamma = 0.99
-        self.rollout = 128
-        self.batch_size = 128
-        self.lr = 0.001
-        self.epsilon = 0.5
-        self.opt = tf.keras.optimizers.Adam(lr=self.lr)
-        self.episode = 0
-        self.score = 0
+        self.envs = SubprocVecEnv(envs)
 
-    def get_action(self, state, is_train=True):
-        # state = tf.convert_to_tensor([state], dtype=tf.float32)
-        logits, _ = self.a2c(np.array([state]))
-        policy = tf.nn.softmax(logits)
-        policy = np.array(policy)[0]
-        # self.epsilon = 1 / (self.episode * 0.1 + 5)
-        # if random.random() < self.epsilon and is_train:
-        #     action = np.random.choice(self.action_size)
-        # else:
-            # where_are_nan = np.isnan(policy)
-            # policy[where_are_nan] = 1e-8
-            # policy = softmax(policy/temperature)
+        self.model = ActorCriticModel(self.state_shape, self.action_size)
+        self.lr = configs['lr']
+        self.gamma = 0.99
+        self.opt = tf.keras.optimizers.Adam(lr=self.lr)
+        self.max_steps = 1000000
+        self.n_step = 5
+        self.best_score = 0
+        self.memory = Memory()
+
+    def get_action(self, state):
+        state = np.array([state], dtype=np.float32)
+        logits, _ = self.model(state)
+        policy = tf.nn.softmax(logits).numpy()[0]
         action = np.random.choice(self.action_size, p=policy)
         return action
 
-    def collect_replay_buffer(self, state):
-        state = np.array(state)
-        state_list, next_state_list, reward_list, done_list, action_list = [], [], [], [], []
+    def count_returns(self, new_values):
+        R = new_values
+        discounted_returns = []
+        for step in reversed(range(len(self.memory.rewards))):
+            R = self.memory.rewards[step] + self.gamma * R * self.memory.masks[step]
+            discounted_returns.insert(0, R)
+        return discounted_returns
 
-        for _ in range(self.rollout):
-            action = self.get_action(state, False)
-            next_state, reward, done, _ = self.env.step(action)
-            next_state = np.array(next_state)
-
-            self.score += reward
-
-            reward = np.clip(reward, -1, 1)
-
-            state_list.append(state)
-            next_state_list.append(next_state)
-            reward_list.append(np.float32(reward))
-            done_list.append(np.float32(done))
-            action_list.append(np.int32(action))
-
-            state = next_state
-
-            if done:
-                self.episode += 1
-                print("Episode %s, Score: %s,  at: %s" % (
-                    self.episode, self.score, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
-                state = self.env.reset()
-                state = np.array(state)
-                if self.episode % 100 == 0:
-                    self.a2c.save("a2c_model/")
-                self.score = 0
-
-        if self.n_step > 1:
-            states, next_states, rewards, dones, actions = [], [], [], [], []
-            for i in range(len(state_list) - self.n_step + 1):
-                state = state_list[i]
-                next_state = next_state_list[i + self.n_step - 1]
-                reward = 0
-                for index, x in enumerate(reward_list[i: i + self.n_step]):
-                    reward += self.gamma ** index * x
-                done = done_list[i]
-                action = action_list[i]
-
-                states.append(state)
-                next_states.append(next_state)
-                rewards.append(reward)
-                dones.append(done)
-
-                actions.append(action)
-            return states, next_states, rewards, dones, actions, state
-
-        return state_list, next_state_list, reward_list, done_list, action_list, state
-
-    def learn(self, max_episode):
-        init_state = self.env.reset()
-        while self.episode < max_episode:
-            _state, _next_state, _reward, _done, _action, init_state = self.collect_replay_buffer(init_state)
-            for _ in range(self.repeat_sampling):
-                sample_range = np.arange(self.rollout - self.n_step + 1)
-                np.random.shuffle(sample_range)
-                sample_idx = sample_range[:self.batch_size]
-
-                state = [_state[i] for i in sample_idx]
-                next_state = [_next_state[i] for i in sample_idx]
-                reward = [_reward[i] for i in sample_idx]
-                done = [_done[i] for i in sample_idx]
-                action = [_action[i] for i in sample_idx]
-
-                a2c_variable = self.a2c.trainable_variables
-                with tf.GradientTape() as tape:
-                    tape.watch(a2c_variable)
-
-                    _, current_value = self.a2c(tf.convert_to_tensor(state, dtype=tf.float32))
-                    _, next_value = self.a2c(tf.convert_to_tensor(next_state, dtype=tf.float32))
-                    current_value, next_value = tf.squeeze(current_value), tf.squeeze(next_value)
-
-                    target = tf.stop_gradient(
-                        self.gamma * (1 - np.array(done)) * np.array(next_value) + np.array(reward))
-                    value_loss = tf.reduce_mean(tf.square(target - current_value) * 0.5)
-
-                    logits, _ = self.a2c(tf.convert_to_tensor(state, dtype=tf.float32))
-                    policy = tf.nn.softmax(logits)
-                    entropy = tf.reduce_mean(- policy * tf.math.log(policy + 1e-8)) * 0.1
-                    # action = tf.convert_to_tensor(action, dtype=tf.int32)
-                    onehot_action = tf.one_hot(action, self.action_size)
-                    action_policy = tf.reduce_sum(onehot_action * policy, axis=1)
-                    adv = tf.stop_gradient(target - current_value)
-                    pi_loss = -tf.reduce_mean(tf.math.log(action_policy + 1e-8) * adv) - entropy
-
-                    total_loss = pi_loss + value_loss
-
-                grads = tape.gradient(total_loss, a2c_variable)
-                self.opt.apply_gradients(zip(grads, a2c_variable))
-
-            # print("Complete parameters update at: ", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-
-        self.a2c.save("my_model/")
-
-    def play(self):
-        obs = self.env.reset()
-        obs = np.array(obs)
+    def test_env(self, vis=False):
+        state = self.env.reset()
+        done = False
         score = 0
-        while True:
-            action = self.get_action(obs, is_train=False)
-            obs, rewards, dones, info = self.env.step(action)
-            obs = np.array(obs)
-            score += rewards
-            self.env.render()
-            if dones > 0:
-                print("得分:", score)
-                obs = self.env.reset()
-                obs = np.array(obs)
-                score = 0
+        while not done:
+            next_state, reward, done, _ = self.env.step(self.get_action(state))
+            state = next_state
+            if vis:
+                self.env.render()
+            score += reward
+        return score
+
+    def learn(self):
+        states = self.envs.reset()
+        step = 1
+        test_scores = []
+
+        while step < self.max_steps:
+
+            with tf.GradientTape() as tape:
+                self.memory.clear()
+                for _ in range(self.n_step):
+                    logits, values = self.model(np.array(states, dtype=np.float32))
+                    policys = tf.nn.softmax(logits)
+                    actions = tf.random.categorical(policys, 1)
+                    actions = tf.squeeze(actions).numpy()
+                    new_states, rewards, dones, _ = self.envs.step(actions)
+                    masks = np.array(1 - dones, dtype=np.int32)[:, None]
+                    self.memory.store(states, actions, np.clip(np.array(rewards), -1, 1)[:, None], values,
+                                      logits,
+                                      policys, masks)
+
+                    states = new_states
+                    step += 1
+
+                    if step % 100 == 0:
+                        # test_scores.append(np.mean([self.test_env() for _ in range(10)]))
+                        score = np.mean([self.test_env() for _ in range(10)])
+                        if score > 500 and score > self.best_score:
+                            self.model.save("SpaceInvaders_model/")
+                        if score > self.best_score:
+                            self.best_score = score
+                        print(step, score)
+                _, new_values = self.model(np.array(new_states, dtype=np.float32))
+                discounted_returns = self.count_returns(new_values)
+                discounted_returns = tf.stop_gradient(np.concatenate(discounted_returns))
+
+                values = tf.concat(self.memory.values, 0)
+                # logits, values = self.model(tf.concat(self.memory.states, 0))
+
+                actions = tf.concat(self.memory.actions, 0)
+                logits = tf.concat(self.memory.logits, 0)
+                probs = tf.concat(self.memory.probs, 0)
+                # probs = tf.nn.softmax(logits)
+                # print(discounted_returns.shape, values.shape, actions.shape, logits.shape, probs.shape)
+                # (40, 1) (40, 1) (40, 1) (40, 2) (40, 2)
+
+                policy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=actions, logits=logits)
+                entropy = tf.reduce_sum(probs * tf.math.log(probs + 1e-20), axis=1)
+                advantage = discounted_returns - values
+                value_loss = tf.nn.l2_loss(advantage)
+                policy_loss = policy_loss * tf.stop_gradient(advantage) - 0.01 * entropy
+                loss = tf.reduce_mean((1 * value_loss + policy_loss))
+
+            grads = tape.gradient(loss, self.model.trainable_variables)
+            self.opt.apply_gradients(zip(grads, self.model.trainable_variables))
 
 
 if __name__ == '__main__':
-    
-    env = make_atari("SpaceInvaders-v0", max_episode_steps=60000)
+    agent = AgentMaster(env_id="SpaceInvaders-v0", lr=0.001)
 
-    state_shape = env.observation_space.shape
-    action_size = env.action_space.n
-
-    a2c = ActorCriticModel((1,)+state_shape, action_size)
-    # a2c = tf.keras.models.load_model("best_model/")
-    agent = Agent(model=a2c, env=env)
-
-    agent.learn(1000000)
-
-    # play
-    # a2c = tf.keras.models.load_model("a2c_model/")
-    # agent = Agent(model=a2c, env=env)
-    # agent.play()
+    agent.learn()

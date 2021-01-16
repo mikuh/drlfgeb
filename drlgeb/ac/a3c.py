@@ -138,9 +138,9 @@ class Worker(threading.Thread):
                     time_count = 0
                 if done:
                     Worker.global_episode += 1
-                    current_time = datetime.datetime.now().strftime("%Y%m%d% H%:M%:S")
+                    # current_time = datetime.datetime.now().strftime("%Y%m%d% H%:M%:S")
                     print(
-                        f"Episode: {Worker.global_episode}, Score: {ep_score}, at: {current_time}, work: {self.worker_idx}")
+                        f"Episode: {Worker.global_episode}, Score: {ep_score}, work: {self.worker_idx}")
                     if Worker.global_episode % 200 == 0:
                         self.global_model.save("my_model/")
                 ep_steps += 1
@@ -183,7 +183,7 @@ if __name__ == '__main__':
     lr = 0.001
     max_eps = 100000
     gamma = 0.99
-    update_freq = 20
+    update_freq = 100
 
     agent = MasterAgent(lr=lr, max_eps=max_eps,
                         gamma=gamma, update_freq=update_freq)
