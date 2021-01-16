@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append("../../")
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import datetime
@@ -10,7 +11,6 @@ import numpy as np
 import tensorflow as tf
 import multiprocessing
 import threading
-
 
 
 class Memory(object):
@@ -55,7 +55,8 @@ class MasterAgent(object):
                           res_queue,
                           i,
                           env_id=self.env_id,
-                          configs=self.configs) for i in range(multiprocessing.cpu_count())]  # multiprocessing.cpu_count()
+                          configs=self.configs) for i in
+                   range(multiprocessing.cpu_count())]  # multiprocessing.cpu_count()
 
         for i, worker in enumerate(workers):
             print("Starting worker {}".format(i))
@@ -138,7 +139,8 @@ class Worker(threading.Thread):
                 if done:
                     Worker.global_episode += 1
                     current_time = datetime.datetime.now().strftime("%Y%m%d% H%:M%:S")
-                    print(f"Episode: {Worker.global_episode}, Score: {ep_score}, at: {current_time}, work: {self.worker_idx}")
+                    print(
+                        f"Episode: {Worker.global_episode}, Score: {ep_score}, at: {current_time}, work: {self.worker_idx}")
                     if Worker.global_episode % 200 == 0:
                         self.global_model.save("my_model/")
                 ep_steps += 1

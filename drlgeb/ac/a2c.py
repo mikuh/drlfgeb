@@ -165,13 +165,13 @@ if __name__ == '__main__':
     state_shape = env.observation_space.shape
     action_size = env.action_space.n
 
-    # a2c = ActorCriticModel((1,)+state_shape, action_size)
+    a2c = ActorCriticModel((1,)+state_shape, action_size)
     # a2c = tf.keras.models.load_model("best_model/")
-    # agent = Agent(model=a2c, env=env)
+    agent = Agent(model=a2c, env=env)
 
-    # agent.learn(1000000)
+    agent.learn(1000000)
 
     # play
-    a2c = tf.keras.models.load_model("a2c_model/")
-    agent = Agent(model=a2c, env=env)
-    agent.play()
+    # a2c = tf.keras.models.load_model("a2c_model/")
+    # agent = Agent(model=a2c, env=env)
+    # agent.play()
