@@ -1,14 +1,17 @@
 import os
+import sys
+sys.path.append("../../")
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-import threading
-import multiprocessing
-import tensorflow as tf
-import numpy as np
-from queue import Queue
-from drlgeb.common import make_atari
-from drlgeb.ac import ActorCriticModel
-
 import datetime
+from drlgeb.ac import ActorCriticModel
+from drlgeb.common import make_atari
+from queue import Queue
+import numpy as np
+import tensorflow as tf
+import multiprocessing
+import threading
+
+
 
 class Memory(object):
     def __init__(self):
@@ -38,7 +41,8 @@ class MasterAgent(object):
 
         self.opt = tf.keras.optimizers.Adam(lr=configs["lr"])
 
-        self.global_model = ActorCriticModel(self.state_shape, self.action_size)  # global network
+        self.global_model = ActorCriticModel(
+            self.state_shape, self.action_size)  # global network
         self.global_model(np.random.random((1,) + self.state_shape))
 
     def learn(self):
@@ -110,7 +114,8 @@ class Worker(threading.Thread):
                 logits, values = self.local_model(np.array([current_state]))
                 policy = tf.nn.softmax(logits, name='policy')
 
-                action = np.random.choice(self.action_size, p=np.array(policy)[0])
+                action = np.random.choice(
+                    self.action_size, p=np.array(policy)[0])
                 new_state, reward, done, _ = self.env.step(action)
                 ep_score += reward
                 mem.store(current_state, action, reward)
@@ -120,17 +125,22 @@ class Worker(threading.Thread):
                         loss = self.get_loss(done, new_state, mem)
                         self.ep_loss += loss
                         # Calculate local gradients
-                        grads = tape.gradient(loss, self.local_model.trainable_weights)
+                        grads = tape.gradient(
+                            loss, self.local_model.trainable_weights)
                         # Push local gradients to global model
-                        self.opt.apply_gradients(zip(grads, self.global_model.trainable_weights))
+                        self.opt.apply_gradients(
+                            zip(grads, self.global_model.trainable_weights))
                         # Update local model with new weights
-                        self.local_model.set_weights(self.global_model.get_weights())
+                        self.local_model.set_weights(
+                            self.global_model.get_weights())
                     mem.clear()
                     time_count = 0
                 if done:
                     Worker.global_episode += 1
-                    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%:M%:S")
+                    current_time = datetime.datetime.now().strftime("%Y%m%d% H%:M%:S")
                     print(f"Episode: {Worker.global_episode}, Score: {ep_score}, at: {current_time}, work: {self.worker_idx}")
+                    if Worker.global_episode % 200 == 0:
+                        self.global_model.save("my_model/")
                 ep_steps += 1
                 time_count += 1
                 current_state = new_state
@@ -149,7 +159,7 @@ class Worker(threading.Thread):
             reward_sum = values.numpy()[0][0]
         discounted_rewards = []
         for reward in memory.rewards[::-1]:
-            reward_sum = reward + self.gamma * reward_sum
+            reward_sum = np.clip(reward, -1, 1) + self.gamma * reward_sum
             discounted_rewards.append(reward_sum)
         discounted_rewards.reverse()
         states = np.array(memory.states)
@@ -173,6 +183,7 @@ if __name__ == '__main__':
     gamma = 0.99
     update_freq = 20
 
-    agent = MasterAgent(lr=lr, max_eps=max_eps, gamma=gamma, update_freq=update_freq)
+    agent = MasterAgent(lr=lr, max_eps=max_eps,
+                        gamma=gamma, update_freq=update_freq)
 
     agent.learn()
