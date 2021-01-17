@@ -8,8 +8,8 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-num_envs = mp.cpu_count() * 2
-
+# num_envs = mp.cpu_count() * 2
+num_envs = 26
 
 def make_env(env_id):
     def _thunk():
@@ -52,27 +52,18 @@ class Memory(object):
         self.states = []
         self.actions = []
         self.rewards = []
-        self.values = []
-        self.logits = []
-        self.probs = []
         self.masks = []
 
-    def store(self, state, action, reward, value, logit, prob, mask):
+    def store(self, state, action, reward, mask):
         self.states.append(state)
         self.actions.append(action)
         self.rewards.append(reward)
-        self.values.append(value)
-        self.logits.append(logit)
-        self.probs.append(prob)
         self.masks.append(mask)
 
     def clear(self):
         self.states = []
         self.actions = []
         self.rewards = []
-        self.values = []
-        self.logits = []
-        self.probs = []
         self.masks = []
 
 
@@ -89,10 +80,9 @@ class AgentMaster(object):
         self.lr = configs['lr']
         self.gamma = 0.99
         self.opt = tf.keras.optimizers.Adam(lr=self.lr)
-        self.max_steps = 1000000
+        self.max_steps = 10000000
         self.n_step = 5
         self.best_score = 0
-        self.memory = Memory()
 
     def get_action(self, state):
         state = np.array([state], dtype=np.float32)
@@ -101,11 +91,11 @@ class AgentMaster(object):
         action = np.random.choice(self.action_size, p=policy)
         return action
 
-    def count_returns(self, new_values):
+    def count_returns(self, new_values, memory):
         R = new_values
         discounted_returns = []
-        for step in reversed(range(len(self.memory.rewards))):
-            R = self.memory.rewards[step] + self.gamma * R * self.memory.masks[step]
+        for step in reversed(range(len(memory.rewards))):
+            R = memory.rewards[step] + self.gamma * R * memory.masks[step]
             discounted_returns.insert(0, R)
         return discounted_returns
 
@@ -123,46 +113,49 @@ class AgentMaster(object):
 
     def learn(self):
         states = self.envs.reset()
-        step = 1
+        step = 0
         test_scores = []
-
+        memory = Memory()
         while step < self.max_steps:
+            memory.clear()
+            for _ in range(self.n_step):
+                logits, values = self.model(np.array(states, dtype=np.float32))
+                policys = tf.nn.softmax(logits)
+                actions = tf.random.categorical(policys, 1)
+                actions = tf.squeeze(actions).numpy()
+                new_states, rewards, dones, _ = self.envs.step(actions)
+                masks = np.array(1 - dones, dtype=np.int32)[:, None]
+                memory.store(states, actions, np.clip(np.array(rewards), -1, 1)[:, None],  masks)
+
+                states = new_states
+                step += 1
+
+                if step % 500 == 0:
+                    # test_scores.append(np.mean([self.test_env() for _ in range(10)]))
+                    score = np.mean([self.test_env() for _ in range(10)])
+                    if score > 500 and score > self.best_score:
+                        self.model.save("SpaceInvaders_model/")
+                    if score > self.best_score:
+                        self.best_score = score
+                    print(f"step:{step}, mean score:{score}, best score: {self.best_score}")
+
+            _, new_values = self.model(np.array(new_states, dtype=np.float32))
+            discounted_returns = self.count_returns(new_values, memory)
+            discounted_returns = tf.stop_gradient(np.concatenate(discounted_returns))
+
+
 
             with tf.GradientTape() as tape:
-                self.memory.clear()
-                for _ in range(self.n_step):
-                    logits, values = self.model(np.array(states, dtype=np.float32))
-                    policys = tf.nn.softmax(logits)
-                    actions = tf.random.categorical(policys, 1)
-                    actions = tf.squeeze(actions).numpy()
-                    new_states, rewards, dones, _ = self.envs.step(actions)
-                    masks = np.array(1 - dones, dtype=np.int32)[:, None]
-                    self.memory.store(states, actions, np.clip(np.array(rewards), -1, 1)[:, None], values,
-                                      logits,
-                                      policys, masks)
 
-                    states = new_states
-                    step += 1
 
-                    if step % 100 == 0:
-                        # test_scores.append(np.mean([self.test_env() for _ in range(10)]))
-                        score = np.mean([self.test_env() for _ in range(10)])
-                        if score > 500 and score > self.best_score:
-                            self.model.save("SpaceInvaders_model/")
-                        if score > self.best_score:
-                            self.best_score = score
-                        print(step, score)
-                _, new_values = self.model(np.array(new_states, dtype=np.float32))
-                discounted_returns = self.count_returns(new_values)
-                discounted_returns = tf.stop_gradient(np.concatenate(discounted_returns))
 
-                values = tf.concat(self.memory.values, 0)
-                # logits, values = self.model(tf.concat(self.memory.states, 0))
+                # values = tf.concat(memory.values, 0)
+                logits, values = self.model(tf.concat(memory.states, 0))
 
-                actions = tf.concat(self.memory.actions, 0)
-                logits = tf.concat(self.memory.logits, 0)
-                probs = tf.concat(self.memory.probs, 0)
-                # probs = tf.nn.softmax(logits)
+                actions = tf.concat(memory.actions, 0)
+                # logits = tf.concat(memory.logits, 0)
+                # probs = tf.concat(memory.probs, 0)
+                probs = tf.nn.softmax(logits)
                 # print(discounted_returns.shape, values.shape, actions.shape, logits.shape, probs.shape)
                 # (40, 1) (40, 1) (40, 1) (40, 2) (40, 2)
 

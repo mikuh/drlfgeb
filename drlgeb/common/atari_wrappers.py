@@ -307,7 +307,7 @@ def make_atari(env_id, max_episode_steps=None, scale=True):
     if env_id.startswith("CartPole"):
         return env
     env = FireResetEnv(env)
-    env = WarpFrame(env, grayscale=True)
+    env = WarpFrame(env, grayscale=False)
     if scale:
         env = ScaledFloatFrame(env)
     env = FrameStack(env, 4)
