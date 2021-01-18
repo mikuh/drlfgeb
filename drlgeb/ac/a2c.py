@@ -71,7 +71,7 @@ class AgentMaster(object):
 
     def __init__(self, env_id="CartPole-v0", **configs):
         envs = [make_env(env_id) for _ in range(num_envs)]
-        self.env = make_atari(env_id, max_episode_steps=60000)
+        self.env = make_atari(env_id)
         self.state_shape = self.env.observation_space.shape
         self.action_size = self.env.action_space.n
         self.envs = SubprocVecEnv(envs)
