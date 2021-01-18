@@ -76,14 +76,14 @@ class Master(Agent):
             self.model = ActorCriticModel(self.state_shape, self.action_size)
         else:
             self.model = DenseAC(self.state_shape, self.action_size)
-        self.lr = CustomSchedule(0.001, [(120000, 0.0003), (720000, 0.0001)])
+        self.lr = CustomSchedule(0.001, [(15360000, 0.0003), (92160000, 0.0001)])
         self.opt = tf.keras.optimizers.Adam(self.lr, epsilon=1e-3)
         self.local_time_max = 5
         self.gamma = 0.99
-        self.batch_size = 128
+        self.batch_size = mp.cpu_count() * 8
         self.step_max = 10000000
         self.episode = 0
-        self.socres = deque(maxlen=100)
+        self.scores = deque(maxlen=100)
         super().__init__(name=env_id)
 
     def get_action(self, state):
@@ -105,25 +105,8 @@ class Master(Agent):
             score += reward
         return score
 
-    def learn(self):
 
-        self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(self.nenvs)])
-        self.work_states = [self.WorkerState() for _ in range(self.nenvs)]
-        self.ps = [Workers(i, remote, work_remote, self.env_id) for i, (remote, work_remote) in
-                   enumerate(zip(self.remotes, self.work_remotes))]
-
-        self.queue = queue.Queue(maxsize=self.batch_size * 2 * 8)
-
-        for work in self.ps:
-            print(f"{work.name} Start!")
-            work.start()
-        # self.ts = [threading.Thread(target=self.recv_send, args=(i,)) for i in range(self.nenvs)]
-        # for t in self.ts:
-        #     t.start()
-
-        t = threading.Thread(target=self.recv_send)
-        t.start()
-
+    def update(self):
         batch = 0
         step = 0
         while step < self.step_max:
@@ -156,7 +139,8 @@ class Master(Agent):
                         entropy_loss = tf.reduce_sum(policy * log_probs)
                         value_loss = tf.nn.l2_loss(values - discount_returns)
                         pred_reward = tf.reduce_mean(values)
-                        loss = tf.add_n([policy_loss, entropy_loss * (0.01 if step < 480000 else 0.005), value_loss]) / self.batch_size
+                        loss = tf.add_n([policy_loss, entropy_loss * (0.01 if step < 61440000 else 0.005),
+                                         value_loss*0.5]) / self.batch_size
 
                     grads = tape.gradient(loss, self.model.trainable_variables)
                     grads = [(tf.clip_by_norm(grad, 0.1 * tf.cast(tf.size(grad), tf.float32))) for grad in grads]
@@ -166,11 +150,11 @@ class Master(Agent):
                     self.train_summary(step=step, loss=loss)
 
                     if batch % 50 == 0:
-                        templete = "Batch {}, step {}, pred_reward: {}, loss:{}, policy_loss: {}, entropy_loss:{}, value_loss:{}, importance:{}"
+                        templete = "Batch {}, step {}, pred_reward: {}, loss:{}, policy_loss: {}, entropy_loss:{}, value_loss:{}, importance:{}， train_score:{}"
                         print(templete.format(batch, step, pred_reward, loss, policy_loss, entropy_loss, value_loss,
-                                              tf.reduce_mean(importance)))
-                    if batch % 200 == 0:
-                        scores = [self.test_env() for _ in range(50)]
+                                              tf.reduce_mean(importance), np.mean(self.scores)))
+                    if batch % 500 == 0:
+                        scores = [self.test_env() for _ in range(10)]
                         mean_score, max_score = np.mean(scores), np.max(scores)
                         print("=" * 50)
                         print("Mean Score: {}, Max Score: {}".format(np.mean(scores), np.max(scores)))
@@ -180,7 +164,33 @@ class Master(Agent):
                         self.checkpoint_save()
                     break
 
-        # [work.join() for work in self.ps]
+    def learn(self):
+
+        self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(self.nenvs)])
+        self.work_states = [self.WorkerState() for _ in range(self.nenvs)]
+        self.ps = [Workers(i, remote, work_remote, self.env_id) for i, (remote, work_remote) in
+                   enumerate(zip(self.remotes, self.work_remotes))]
+
+        self.queue = queue.Queue(maxsize=self.batch_size * 2 * 8)
+
+        for work in self.ps:
+            print(f"{work.name} Start!")
+            work.start()
+        # self.ts = [threading.Thread(target=self.recv_send, args=(i,)) for i in range(self.nenvs)]
+        # for t in self.ts:
+        #     t.start()
+
+        t = threading.Thread(target=self.recv_send)
+        t.start()
+
+        update = threading.Thread(target=self.update())
+        update.start()
+
+
+
+        [work.join() for work in self.ps]
+        t.join()
+        update.join()
         # [t.join() for t in self.ts]
 
     def recv_send(self):
@@ -190,7 +200,7 @@ class Master(Agent):
                 work_idx, state, reward, done = self.remotes[idx].recv()
                 self.work_states[idx].score += reward
                 if done:
-                    self.socres.append(self.work_states[idx].score)
+                    self.scores.append(self.work_states[idx].score)
                     self.work_states[idx].score = 0
                 if len(self.work_states[idx].memory) > 0:
                     self.work_states[idx].memory[-1].reward = reward
