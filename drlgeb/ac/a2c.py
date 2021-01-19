@@ -163,7 +163,7 @@ class AgentMaster(object):
                 entropy = tf.reduce_sum(probs * tf.math.log(probs + 1e-20), axis=1)
                 advantage = discounted_returns - values
                 value_loss = tf.nn.l2_loss(advantage)
-                policy_loss = policy_loss * tf.stop_gradient(advantage) - 0.01 * entropy
+                policy_loss = -1 * policy_loss * tf.stop_gradient(advantage) - 0.01 * entropy
                 loss = tf.reduce_mean((1 * value_loss + policy_loss))
 
             grads = tape.gradient(loss, self.model.trainable_variables)

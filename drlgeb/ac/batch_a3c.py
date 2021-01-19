@@ -12,7 +12,7 @@ from multiprocessing import Process, Pipe
 import multiprocessing as mp
 import tensorflow as tf
 import numpy as np
-
+from drlgeb.common.logging_util import default_logger as logging
 
 
 class RateSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
@@ -163,7 +163,7 @@ class Master(Agent):
         t = threading.Thread(target=self.recv_send)
         t.start()
 
-        update = threading.Thread(target=self.update())
+        update = threading.Thread(target=self.update)
         update.start()
 
         for worker in self.ps:
@@ -172,8 +172,9 @@ class Master(Agent):
         update.join()
 
     def recv_send(self):
+        candidate = list(range(self.nenvs))
         while True:
-            idxs = np.random.choice(range(self.nenvs), self.batch_size)
+            idxs = np.random.choice(candidate, 32)
             for idx in idxs:
                 work_idx, state, reward, done = self.remotes[idx].recv()
                 self.work_states[idx].score += reward
@@ -214,18 +215,16 @@ class Master(Agent):
             self.work_states[idx].memory = []
 
     def record(self, step, **kwargs):
-        if step % 50 == 0:
-            train_mean_score = np.mean(self.scores) if len(self.scores) > 1 else None
-            log_txt = f"BatchStep:{step}, train_mean_score:{train_mean_score}," + ','.join(
-                [f" {k}:{v}" for k, v in kwargs.items()])
+        if step % 100 == 0:
+            train_mean_score = np.mean(self.scores) if len(self.scores) > 1 else 0.0
+            kwargs["train_mean_score"] = train_mean_score
+            log_txt = f"BatchStep:{step}, " + ','.join([f" {k}:{v}" for k, v in kwargs.items()])
             print(log_txt)
             self.train_summary(step=step, **kwargs)
         if step % 18000 == 0:
             scores = [self.test_env() for _ in range(50)]
             mean_score, max_score = np.mean(scores), np.max(scores)
-            print("=" * 50)
-            print("Mean Score: {}, Max Score: {}".format(np.mean(scores), np.max(scores)))
-            print("=" * 50)
+            logging.info("Mean Score: {}, Max Score: {}".format(np.mean(scores), np.max(scores)))
             self.train_summary(step=step, mean_score=mean_score, max_score=max_score)
         if step % 6000 == 0:
             self.checkpoint_save(step)
