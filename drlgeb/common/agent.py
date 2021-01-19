@@ -1,6 +1,7 @@
 import abc
 import datetime
 import tensorflow as tf
+from drlgeb.common.logging_util import default_logger as logging
 import os
 
 
@@ -8,41 +9,59 @@ class Agent(object, metaclass=abc.ABCMeta):
 
     def __init__(self, **kwargs):
         current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        train_log_dir = './train_logs/train-{}-{}/'.format(kwargs["name"], current_time)
-        self.summary_writer = tf.summary.create_file_writer(train_log_dir)
-        self.train_loss = tf.keras.metrics.Mean('loss', dtype=tf.float32)
-        self.mean_score = tf.keras.metrics.Mean('mean score', dtype=tf.float32)
-        self.max_score = tf.keras.metrics.Mean('max score', dtype=tf.float32)
-
-        checkpoint_path = "train-%s/cp-{epoch:04d}.ckpt" % (kwargs["name"])
-        self.checkpoint_dir = os.path.dirname(checkpoint_path)
-        self.ckpt = tf.train.Checkpoint(step=tf.Variable(1))
-        self.manager = tf.train.CheckpointManager(self.ckpt,
-                                                  './train_logs/train-{}-{}/'.format(kwargs["name"], current_time),
-                                                  max_to_keep=5)
+        self.train_log_dir = './train_logs/train-{}-{}/'.format(kwargs["name"], current_time)
+        # self.ckpt = tf.train.Checkpoint(step=tf.Variable(1), optimizer=kwargs['opt'], net=kwargs['net'])
+        # self.manager = tf.train.CheckpointManager(self.ckpt, self.train_log_dir, max_to_keep=5)
+        assert getattr(self, 'model', None) is not None
+        assert getattr(self, 'env', None) is not None
 
     @abc.abstractmethod
     def learn(self):
         pass
 
-    def get_env(self):
+    @abc.abstractmethod
+    def record(self):
         pass
 
-    def train_summary(self, step, loss=None, mean_score=None, max_score=None):
+    @abc.abstractmethod
+    def get_action(self, state):
+        pass
 
-        with self.summary_writer.as_default():
-            if loss:
-                self.train_loss(loss)
-                tf.summary.scalar('loss', self.train_loss.result(), step=step)
-                self.train_loss.reset_states()
-            if mean_score:
-                self.mean_score(mean_score)
-                tf.summary.scalar('mean score', self.mean_score.result(), step=step)
-                self.mean_score.reset_states()
-            if max_score:
-                self.max_score(max_score)
-                tf.summary.scalar('max score', self.max_score.result(), step=step)
-                self.max_score.reset_states()
+    def play(self, episodes: int, model_path: str):
+        try:
+            latest = tf.train.latest_checkpoint(model_path)
+            print(latest)
+            self.model.load_weights(latest)
+        except:
+            self.model = tf.keras.models.load_model(model_path)
+        obs = self.env.reset()
+        score = 0
+        episode = 0
+        while True:
+            action = self.get_action(obs)
+            obs, reward, done, info = self.env.step(action)
+            score += reward
+            self.env.render()
+            if done:
+                episode += 1
+                print(f"Episode {episode} score:", score)
+                if episode == episodes:
+                    break
+                obs = self.env.reset()
+                score = 0
 
-    def checkpoint_save(self):
-        self.manager.save()
+    def train_summary(self, step, **kwargs):
+        if getattr(self, 'summary_writer', None) is None:
+            self.__setattr__('summary_writer', tf.summary.create_file_writer(self.train_log_dir))
+        with getattr(self, 'summary_writer').as_default():
+            for k, v in kwargs.items():
+                if getattr(self, k, None) is None:
+                    self.__setattr__(k, tf.keras.metrics.Mean(k, dtype=tf.float32))
+
+                getattr(self, k)(v)
+                tf.summary.scalar(k, getattr(self, k).result(), step=step)
+                getattr(self, k).reset_states()
+
+    def checkpoint_save(self, batch):
+        self.model.save_weights(os.path.join(self.train_log_dir, str(batch % 5) + "-ckp"))
+        logging.info("Save checkpoint successfully, at:{}".format(self.train_log_dir))
