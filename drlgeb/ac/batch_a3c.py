@@ -102,7 +102,6 @@ class Master(Agent):
         return score
 
     def update(self):
-        batch = 0
         step = 0
         while step < self.step_max:
             states = []
@@ -111,7 +110,6 @@ class Master(Agent):
             action_probs = []
             while True:
                 state, action, R, action_prob = self.queue.get()
-                step += 1
                 states.append(state)
                 actions.append(action)
                 discount_returns.append(R)
@@ -140,8 +138,8 @@ class Master(Agent):
                     grads = tape.gradient(loss, self.model.trainable_variables)
                     # grads = [(tf.clip_by_norm(grad, 0.1 * tf.cast(tf.size(grad), tf.float32))) for grad in grads]
                     self.opt.apply_gradients(zip(grads, self.model.trainable_variables))
-                    batch += 1
-                    self.record(step=batch, pred_reward=pred_reward, loss=loss, policy_loss=policy_loss,
+                    step += 1
+                    self.record(step=step, pred_reward=pred_reward, loss=loss, policy_loss=policy_loss,
                                 entropy_loss=entropy_loss, value_loss=value_loss, importance=tf.reduce_mean(importance))
                     break
 
@@ -216,7 +214,7 @@ class Master(Agent):
         if step % 100 == 0:
             train_mean_score = np.mean(self.scores) if len(self.scores) > 1 else 0.0
             kwargs["train_mean_score"] = train_mean_score
-            log_txt = f"BatchStep:{step}, " + ','.join([f" {k}:{v}" for k, v in kwargs.items()])
+            log_txt = f"Step:{step}, " + ','.join([f" {k}:{v}" for k, v in kwargs.items()])
             print(log_txt + "," + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
             self.train_summary(step=step, **kwargs)
         if step % 18000 == 0:
@@ -226,6 +224,8 @@ class Master(Agent):
             self.train_summary(step=step, mean_score=mean_score, max_score=max_score)
         if step % 6000 == 0:
             self.checkpoint_save(step // 6000 % 5)
+
+
 
 
 class Workers(Process):
