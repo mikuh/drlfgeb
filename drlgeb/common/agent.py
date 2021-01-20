@@ -20,6 +20,7 @@ class Agent(object, metaclass=abc.ABCMeta):
         if kwargs.get('init_ckp_path', None):
             latest = tf.train.latest_checkpoint(kwargs.get('init_ckp_path'))
             self.model.load_weights(latest)
+            # self.train_log_dir = kwargs.get('init_ckp_path')
 
         self.model.build((None,) + self.state_shape)
         self.model.summary()
@@ -73,4 +74,4 @@ class Agent(object, metaclass=abc.ABCMeta):
 
     def checkpoint_save(self, num):
         self.model.save_weights(os.path.join(self.train_log_dir, str(num) + "-ckp"))
-        logging.info("Save checkpoint successfully, at:{}".format(self.train_log_dir))
+        logging.info("Save checkpoint successfully, in:{}".format(self.train_log_dir))

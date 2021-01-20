@@ -344,7 +344,9 @@ if __name__ == '__main__':
 
     # np.set_printoptions(threshold=np.inf)
     a = np.array(env.reset())
-    print(a)
+    print(a.shape)
+    b = np.array(env.step(2))
+    print(b.shape)
     # env = make_atari(env_id="SpaceInvaders-v0", scale=False)
     # b = np.array(env.reset())
     # print(b)
