@@ -14,6 +14,15 @@ class Agent(object, metaclass=abc.ABCMeta):
         # self.manager = tf.train.CheckpointManager(self.ckpt, self.train_log_dir, max_to_keep=5)
         assert getattr(self, 'model', None) is not None
         assert getattr(self, 'env', None) is not None
+        assert getattr(self, 'state_shape', None) is not None
+        assert getattr(self, 'action_size', None) is not None
+
+        if kwargs.get('init_ckp_path', None):
+            latest = tf.train.latest_checkpoint(kwargs.get('init_ckp_path'))
+            self.model.load_weights(latest)
+
+        self.model.build((None,) + self.state_shape)
+        self.model.summary()
 
     @abc.abstractmethod
     def learn(self):
@@ -62,6 +71,6 @@ class Agent(object, metaclass=abc.ABCMeta):
                 tf.summary.scalar(k, getattr(self, k).result(), step=step)
                 getattr(self, k).reset_states()
 
-    def checkpoint_save(self, batch):
-        self.model.save_weights(os.path.join(self.train_log_dir, str(batch % 5) + "-ckp"))
+    def checkpoint_save(self, num):
+        self.model.save_weights(os.path.join(self.train_log_dir, str(num) + "-ckp"))
         logging.info("Save checkpoint successfully, at:{}".format(self.train_log_dir))

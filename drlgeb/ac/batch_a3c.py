@@ -71,18 +71,16 @@ class Master(Agent):
         self.state_shape = self.env.observation_space.shape
         self.action_size = self.env.action_space.n
         self.model = ActorCriticModel(self.state_shape, self.action_size)
-        self.model.build((None,) + self.state_shape)
-        self.model.summary()
-        self.nenvs = configs['nenvs']
-        self.lr = RateSchedule(configs['lr'], [(120000, 0.0003), (720000, 0.0001)])
+        self.nenvs = configs.get('nenvs', mp.cpu_count() * 2)
+        self.lr = RateSchedule(configs.get('lr', 0.01), [(120000, 0.0003), (720000, 0.0001)])
         self.opt = tf.keras.optimizers.Adam(self.lr, epsilon=1e-3)
-        self.local_time_max = configs['local_time_max']
-        self.gamma = configs['discount_gamma']
-        self.batch_size = configs['batch_size']
-        self.step_max = configs['step_max']
+        self.local_time_max = configs.get('local_time_max', 5)
+        self.gamma = configs.get('discount_gamma', 0.99)
+        self.batch_size = configs.get('batch_size', 128)
+        self.step_max = configs.get('step_max', 1e9)
         self.scores = deque(maxlen=100)
 
-        super().__init__(name=env_id, opt=self.opt, net=self.model)
+        super().__init__(name=env_id, **configs)
 
     def get_action(self, state):
         state = np.array([state], dtype=np.float32)
@@ -227,7 +225,7 @@ class Master(Agent):
             logging.info("Mean Score: {}, Max Score: {}".format(np.mean(scores), np.max(scores)))
             self.train_summary(step=step, mean_score=mean_score, max_score=max_score)
         if step % 6000 == 0:
-            self.checkpoint_save(step)
+            self.checkpoint_save(step // 6000 % 5)
 
 
 class Workers(Process):
