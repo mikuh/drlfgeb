@@ -13,7 +13,7 @@ import multiprocessing as mp
 import tensorflow as tf
 import numpy as np
 from drlgeb.common.logging_util import default_logger as logging
-
+import time
 
 class RateSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, init_rate, l: list):
@@ -217,7 +217,7 @@ class Master(Agent):
             train_mean_score = np.mean(self.scores) if len(self.scores) > 1 else 0.0
             kwargs["train_mean_score"] = train_mean_score
             log_txt = f"BatchStep:{step}, " + ','.join([f" {k}:{v}" for k, v in kwargs.items()])
-            print(log_txt)
+            print(log_txt + "," + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
             self.train_summary(step=step, **kwargs)
         if step % 18000 == 0:
             scores = [self.test_env() for _ in range(50)]
