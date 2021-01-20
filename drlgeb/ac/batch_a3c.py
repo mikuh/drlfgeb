@@ -101,6 +101,7 @@ class Master(Agent):
             score += reward
         return score
 
+    @tf.function
     def update(self):
         step = 0
         while step < self.step_max:
@@ -185,7 +186,7 @@ class Master(Agent):
                 self.work_states[idx].memory.append(
                     TransitionExperience(state, action, reward=None, value=value, prob=action_prob))
                 self.remotes[idx].send(action)
-
+    @tf.function
     def predict(self, state):
         logit, value = self.model(np.array([state], dtype=np.float32))
         policy = tf.nn.softmax(logit).numpy()[0]
