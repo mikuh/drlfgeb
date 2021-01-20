@@ -13,7 +13,7 @@ import multiprocessing as mp
 import tensorflow as tf
 import numpy as np
 from drlgeb.common.logging_util import default_logger as logging
-
+import time
 
 class RateSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, init_rate, l: list):
@@ -78,6 +78,7 @@ class Master(Agent):
         self.gamma = configs.get('discount_gamma', 0.99)
         self.batch_size = configs.get('batch_size', 128)
         self.step_max = configs.get('step_max', 1e9)
+        self.predict_size = configs.get('predict_size', 16)
         self.scores = deque(maxlen=100)
 
         super().__init__(name=env_id, **configs)
@@ -172,27 +173,39 @@ class Master(Agent):
     def recv_send(self):
         candidate = list(range(self.nenvs))
         while True:
-            idxs = np.random.choice(candidate, 32)
+            np.random.shuffle(candidate)
+            idxs = candidate[:16]
+            state_buffer = []
+            reward_buffer = []
+            done_buffer = []
             for idx in idxs:
                 work_idx, state, reward, done = self.remotes[idx].recv()
-                self.work_states[idx].score += reward
-                if done:
+                state_buffer.append(state)
+                reward_buffer.append(reward)
+                done_buffer.append(done)
+            actions, values, action_probs = self.predict(state_buffer)
+            for i, idx in enumerate(idxs):
+                self.work_states[idx].score += reward_buffer[i]
+                if done_buffer[i]:
                     self.scores.append(self.work_states[idx].score)
                     self.work_states[idx].score = 0
                 if len(self.work_states[idx].memory) > 0:
-                    self.work_states[idx].memory[-1].reward = reward
-                    if done or len(self.work_states[idx].memory) == self.local_time_max + 1:
-                        self.collect_experience(idx, done)
-                action, value, action_prob = self.predict(state)
+                    self.work_states[idx].memory[-1].reward = reward_buffer[i]
+                    if done_buffer[i] or len(self.work_states[idx].memory) == self.local_time_max + 1:
+                        self.collect_experience(idx, done_buffer[i])
                 self.work_states[idx].memory.append(
-                    TransitionExperience(state, action, reward=None, value=value, prob=action_prob))
-                self.remotes[idx].send(action)
+                    TransitionExperience(state_buffer[i], actions[i], reward=None, value=values[i], prob=action_probs[i]))
+                self.remotes[idx].send(actions[i])
+
 
     def predict(self, state):
-        logit, value = self.model(np.array([state], dtype=np.float32))
-        policy = tf.nn.softmax(logit).numpy()[0]
-        action = np.random.choice(self.action_size, p=policy)
-        return action, value.numpy()[0], policy[action]
+        logit, value = self.model(np.array(state))
+        policy = tf.nn.softmax(logit).numpy()
+        action = tf.random.categorical(policy, 1)
+        action = tf.squeeze(action).numpy()
+        return (action,
+                value.numpy(),
+                tf.reduce_sum(policy * tf.one_hot(action, self.action_size), 1).numpy())
 
     def collect_experience(self, idx, done):
         mem = self.work_states[idx].memory
@@ -217,7 +230,7 @@ class Master(Agent):
             train_mean_score = np.mean(self.scores) if len(self.scores) > 1 else 0.0
             kwargs["train_mean_score"] = train_mean_score
             log_txt = f"BatchStep:{step}, " + ','.join([f" {k}:{v}" for k, v in kwargs.items()])
-            print(log_txt)
+            print(log_txt, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
             self.train_summary(step=step, **kwargs)
         if step % 18000 == 0:
             scores = [self.test_env() for _ in range(50)]
@@ -266,6 +279,7 @@ if __name__ == '__main__':
     }
 
     agent = Master(env_id="SpaceInvaders-v0", **configs)
+    # agent.predict([np.array(agent.env.reset()), np.array(agent.env.step(1)[0])])
     agent.learn()
 
     # agent.play(5, model_path="/home/geb/PycharmProjects/drlgeb/drlgeb/ac/train_logs/train-SpaceInvaders-v0-20210119-195521")
