@@ -16,7 +16,7 @@ Now just implement the batch a3c, other algorithms will be updated in the future
 pip install drlgeb
 ```
 
-## Get start
+## Quick Start
 
 #### A3C
 ```python
