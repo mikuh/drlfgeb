@@ -6,8 +6,8 @@ Now just implement the batch a3c, other algorithms will be updated in the future
 
 ## Requirement
 - Linux/windows/osx
-- python3.8
-- tensorflow2.4
+- python>=3.8
+- tensorflow>=2.2
 - gym[atari]
 - numpy
 
@@ -21,8 +21,6 @@ pip install drlgeb
 #### A3C
 ```python
 from drlgeb.ac import A3C
-
-
 
 env_id = "SpaceInvaders-v0"
 agent = A3C(env_id=env_id)
