@@ -172,8 +172,7 @@ class Worker(threading.Thread):
 
         policy = tf.nn.softmax(logits)
         entropy = tf.reduce_sum(policy * tf.math.log(policy + 1e-20), axis=1)
-        policy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=memory.actions,
-                                                                     logits=logits)
+        policy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=memory.actions, logits=logits)
         policy_loss = policy_loss * tf.stop_gradient(advantage) - 0.01 * entropy
         loss = tf.reduce_mean((1 * value_loss + policy_loss))
         return loss

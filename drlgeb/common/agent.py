@@ -3,7 +3,8 @@ import datetime
 import tensorflow as tf
 from drlgeb.common.logging_util import default_logger as logging
 import os
-
+from gym import wrappers
+import time
 
 class Agent(object, metaclass=abc.ABCMeta):
 
@@ -38,6 +39,7 @@ class Agent(object, metaclass=abc.ABCMeta):
         pass
 
     def play(self, episodes: int, model_path: str):
+        self.env = wrappers.Monitor(self.env, './videos/' + str(time.time()) + '/')
         try:
             latest = tf.train.latest_checkpoint(model_path)
             print(latest)
@@ -52,6 +54,7 @@ class Agent(object, metaclass=abc.ABCMeta):
             obs, reward, done, info = self.env.step(action)
             score += reward
             self.env.render()
+            # time.sleep(0.03)
             if done:
                 episode += 1
                 print(f"Episode {episode} score:", score)
@@ -59,6 +62,7 @@ class Agent(object, metaclass=abc.ABCMeta):
                     break
                 obs = self.env.reset()
                 score = 0
+        self.env.close()
 
     def train_summary(self, step, **kwargs):
         if getattr(self, 'summary_writer', None) is None:
