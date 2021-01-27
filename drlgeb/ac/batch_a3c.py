@@ -3,7 +3,7 @@ import sys
 sys.path.append("../../")
 
 from drlgeb.ac.model import ActorCriticModel
-from drlgeb.common import make_atari, Agent
+from drlgeb.common import make_game, Agent
 from collections import deque
 import queue
 import threading
@@ -48,7 +48,7 @@ class Master(Agent):
 
     def __init__(self, env_id="SpaceInvaders-v0", **configs):
         self.env_id = env_id
-        self.env = make_atari(env_id=env_id)
+        self.env = make_game(env_id=env_id)
         self.state_shape = self.env.observation_space.shape
         self.action_size = self.env.action_space.n
         self.model = ActorCriticModel(self.state_shape, self.action_size)
@@ -59,6 +59,7 @@ class Master(Agent):
         self.gamma = configs.get('discount_gamma', 0.99)
         self.batch_size = configs.get('batch_size', 128)
         self.step_max = configs.get('step_max', 1e9)
+        self.no_graphics = configs.get('no_graphics', False)
         self.scores = deque(maxlen=100)
 
         super().__init__(name=env_id, **configs)
@@ -128,7 +129,7 @@ class Master(Agent):
 
         self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(self.nenvs)])
         self.work_states = [self.WorkerState() for _ in range(self.nenvs)]
-        self.ps = [Workers(i, remote, work_remote, self.env_id) for i, (remote, work_remote) in
+        self.ps = [Worker(i, remote, work_remote, self.env_id, self.no_graphics) for i, (remote, work_remote) in
                    enumerate(zip(self.remotes, self.work_remotes))]
 
         self.queue = queue.Queue(maxsize=self.batch_size * 2 * 8)
@@ -168,7 +169,10 @@ class Master(Agent):
                 self.remotes[idx].send(action)
 
     def predict(self, state):
-        logit, value = self.model(np.array([state], dtype=np.float32))
+        # print(np.array(state).shape)
+        # state = np.array(state)
+        # print(np.array(state).shape)
+        logit, value = self.model(np.array(state, dtype=np.float32)[None, :])
         policy = tf.nn.softmax(logit).numpy()[0]
         action = np.random.choice(self.action_size, p=policy)
         return action, value.numpy()[0], policy[action]
@@ -209,14 +213,15 @@ class Master(Agent):
 
 
 
-class Workers(Process):
-    def __init__(self, idx: int, master_conn, worker_conn, env_id):
+class Worker(Process):
+    def __init__(self, idx: int, master_conn, worker_conn, env_id, no_graphics):
         super().__init__()
         self.idx = idx
         self.name = 'worker-{}'.format(self.idx)
         self.master_conn = master_conn
         self.worker_conn = worker_conn
         self.env_id = env_id
+        self.no_graphics = no_graphics
 
     def run(self):
         env = self.get_env()
@@ -230,23 +235,22 @@ class Workers(Process):
                 state = env.reset()
 
     def get_env(self):
-        if self.env_id.startswith("CartPole"):
-            return gym.make("CartPole-v0")
-        return make_atari(env_id=self.env_id, max_episode_steps=60000)
+        return make_game(env_id=self.env_id, max_episode_steps=60000, worker_id=self.idx, no_graphics=self.no_graphics)
 
 
 if __name__ == '__main__':
     configs = {
-        'nenvs': mp.cpu_count() * 2,
+        'nenvs': 4,
         'lr': 0.001,
         'discount_gamma': 0.99,
         'batch_size': 128,
         'local_time_max': 5,
         'step_max': 1e9,
         'eval_episodes': 50,
+        'no_graphics': False
     }
-
-    agent = Master(env_id="SpaceInvaders-v0", **configs)
+    env_id = "/home/miku/PythonObjects/unity-exercise/envs/Basic/Basic"
+    agent = Master(env_id=env_id,  **configs)
     agent.learn()
 
     # agent.play(5, model_path="/home/geb/PycharmProjects/drlgeb/drlgeb/ac/train_logs/train-SpaceInvaders-v0-20210120-214933")

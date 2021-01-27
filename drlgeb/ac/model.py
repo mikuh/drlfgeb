@@ -6,8 +6,8 @@ class ActorCriticModel(tf.keras.Model):
     def __init__(self, state_shape, action_size):
         super(ActorCriticModel, self).__init__()
         self.action_size = action_size
-        if isinstance(state_shape, int):
-            self.embedding_layer = DenseEmbedding(state_shape)
+        if len(state_shape) == 1:
+            self.embedding_layer = DenseEmbedding()
         else:
             self.embedding_layer = CnnEmbedding(state_shape)
         self.policy_logits = tf.keras.layers.Dense(action_size)

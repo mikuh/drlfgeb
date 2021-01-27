@@ -8,6 +8,8 @@ from collections import deque
 import gym
 from gym import spaces
 import cv2
+from mlagents_envs.environment import UnityEnvironment
+from gym_unity.envs import UnityToGymWrapper
 
 cv2.ocl.setUseOpenCL(False)
 
@@ -301,14 +303,21 @@ class LazyFrames(object):
         return self._force()[..., i]
 
 
-def make_atari(env_id, max_episode_steps=None, scale=True, grayscale=False, episode_life=False):
-    """reference tensorpack's setting"""
-    env = gym.make(env_id)
-    if env_id.startswith("CartPole"):
+def make_game(env_id, max_episode_steps=None, scale=True, grayscale=False, episode_life=False, worker_id=999,
+               no_graphics=False):
+    """make a game env
+    """
+    if 'unity' in env_id:
+        unity_env = UnityEnvironment(env_id, worker_id=worker_id, no_graphics=no_graphics)
+        env = UnityToGymWrapper(unity_env, uint8_visual=True)
+    else:
+        env = gym.make(env_id)
+    if len(env.observation_space.shape) == 1:
         return env
     if episode_life:
         env = EpisodicLifeEnv(env)
-    env = FireResetEnv(env)
+    if 'FIRE' in getattr(env.unwrapped, 'get_action_meanings', []):
+        env = FireResetEnv(env)
     env = WarpFrame(env, grayscale=grayscale)
     if scale:
         env = ScaledFloatFrame(env)
